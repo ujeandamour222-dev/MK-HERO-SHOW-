@@ -27,12 +27,36 @@ if (firebaseReady) {
   // signInWithGoogle/signInWithApple below — mobile browsers
   // don't reliably support signInWithPopup, so we navigate away
   // and come back instead).
+  const wasExpectingRedirect = sessionStorage.getItem("mpr_pending_redirect") === "1";
+  sessionStorage.removeItem("mpr_pending_redirect");
+
   mods.getRedirectResult(auth).then(async result => {
     if (result && result.user) {
       await handleOAuthUser(result.user);
+    } else if (wasExpectingRedirect) {
+      // Byagarutse kuva kuri Google/Apple ariko nta konti yabonetse,
+      // nta n'ikosa ryatanzwe — ibi bikunze kubaho iyo terefone/browser
+      // ibuza "third-party storage" (nka Chrome ifite "Block third-party
+      // cookies" cyangwa Incognito). Firebase Auth redirect isaba iyo
+      // storage kugira ngo ikore neza.
+      window.openAuth();
+      const msg = document.getElementById("authMessage");
+      if (msg) {
+        msg.innerHTML = `<div class="notice error">
+          Kwinjira kuri Google/Apple ntibyarangiye. Iyi terefone/browser
+          ishobora kuba ibuza "third-party cookies" — jya muri Chrome
+          Settings → Site settings → Cookies, wemeze cookies zose
+          (ntubuze third-party cookies), hanyuma ugerageze nanone.
+          Cyangwa koresha email/password aho gukoresha Google.
+        </div>`;
+      }
     }
   }).catch(error => {
     console.error("Redirect sign-in error:", error);
+    // Nyuma ya redirect, modal iba ifunze (page yongeye gufungura bundi
+    // bushya) — niba tutayifunguye, ikosa riba rihishe, umukoresha
+    // akabona nk'aho "byasimbutse" ariko nta kimenyetso agize.
+    window.openAuth();
     const msg = document.getElementById("authMessage");
     if (msg) msg.innerHTML = `<div class="notice error">${friendlyAuthError(error)}</div>`;
   });
@@ -352,6 +376,7 @@ function friendlyAuthError(error) {
   if (code.includes("popup-closed-by-user")) return "Wafunze idirishya mbere yo kurangiza kwinjira.";
   if (code.includes("popup-blocked")) return "Iyi terefone/browser yabujije popup. Emeza popups hanyuma ugerageze.";
   if (code.includes("account-exists-with-different-credential")) return "Iyi email isanzwe ifite konti yakoze ukoresheje ubundi buryo (urugero password).";
+  if (code.includes("unauthorized-domain")) return "Iyi domain ntiremewe muri Firebase. Ujye kuri Authentication → Paramètres → Domaines autorisés, wongeremo domain y'urubuga rwawe rw'ubu.";
   return "Habaye ikibazo. Ongera ugerageze.";
 }
 
@@ -407,6 +432,7 @@ window.signInWithGoogle = async function () {
     const mods = getFirebaseModules();
     const provider = new mods.GoogleAuthProvider();
     msg.innerHTML = `<div class="notice">⏳ Turimo kukoherereza kuri Google...</div>`;
+    sessionStorage.setItem("mpr_pending_redirect", "1");
     await mods.signInWithRedirect(auth, provider);
     // Page navigates away here; the result is picked up by
     // getRedirectResult() above once the browser returns.
@@ -426,6 +452,7 @@ window.signInWithApple = async function () {
     const mods = getFirebaseModules();
     const provider = new mods.OAuthProvider("apple.com");
     msg.innerHTML = `<div class="notice">⏳ Turimo kukoherereza kuri Apple...</div>`;
+    sessionStorage.setItem("mpr_pending_redirect", "1");
     await mods.signInWithRedirect(auth, provider);
   } catch (error) {
     console.error(error);
