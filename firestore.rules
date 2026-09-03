@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUid() {
+      return request.auth.uid;
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(myUid())).data.role;
+    }
+
+    function isOwner() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(myUid())).data.isAdmin == true;
+    }
+
+    function isDriver() {
+      return isSignedIn() && myRole() == 'driver';
+    }
+
+    /* ===================== USERS ===================== */
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      // Umukoresha yandika/ahindura gusa umwirondoro we bwite, ntabwo
+      // yishyiraho ubwe isAdmin cyangwa role=owner/admin.
+      allow create: if isSignedIn() && myUid() == userId &&
+        request.resource.data.isAdmin == false;
+      allow update: if isOwner() || (
+        isSignedIn() && myUid() == userId &&
+        request.resource.data.isAdmin == resource.data.isAdmin &&
+        (!('role' in request.resource.data) || request.resource.data.role != 'owner')
+      );
+      allow delete: if isOwner();
+    }
+
+    /* ===================== RIDERS (driver profiles) ===================== */
+    match /riders/{riderId} {
+      allow read: if true;
+      allow write: if isOwner() || (isSignedIn() && myUid() == riderId);
+    }
+
+    /* ===================== TRIPS ===================== */
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && (
+        isOwner() ||
+        resource.data.passengerUid == myUid() ||
+        resource.data.driverId == myUid() ||
+        (resource.data.status == 'pending' && isDriver())
+      );
+      allow create: if isSignedIn() && request.resource.data.passengerUid == myUid();
+      // Umumotari/umudereva ashobora kwifatira job ("pending" -> "accepted")
+      // gusa niba atarafatwa n'undi, cyangwa akavugurura trip ye bwite.
+      allow update: if isOwner() ||
+        (isSignedIn() && resource.data.passengerUid == myUid()) ||
+        (isSignedIn() && isDriver() && (
+          (resource.data.status == 'pending' && request.resource.data.driverId == myUid()) ||
+          resource.data.driverId == myUid()
+        ));
+      allow delete: if isOwner();
+    }
+
+    /* ===================== DELIVERIES ===================== */
+    match /deliveries/{deliveryId} {
+      allow read: if isSignedIn() && (
+        isOwner() ||
+        resource.data.senderUid == myUid() ||
+        resource.data.driverId == myUid() ||
+        (resource.data.status == 'REQUESTED' && isDriver())
+      );
+      allow create: if isSignedIn() && request.resource.data.senderUid == myUid();
+      allow update: if isOwner() ||
+        (isSignedIn() && resource.data.senderUid == myUid()) ||
+        (isSignedIn() && isDriver() && (
+          (resource.data.status == 'REQUESTED' && request.resource.data.driverId == myUid()) ||
+          resource.data.driverId == myUid()
+        ));
+      allow delete: if isOwner();
+    }
+
+    /* ===================== FARE SETTINGS ===================== */
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isOwner();
+    }
+
+    /* ===================== PAYMENTS ===================== */
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && (isOwner() || resource.data.uid == myUid());
+      allow create: if isSignedIn() && request.resource.data.uid == myUid();
+      allow update: if isOwner();
+      allow delete: if isOwner();
+    }
+
+    /* ===================== RATINGS ===================== */
+    match /ratings/{ratingId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.passengerUid == myUid();
+      allow update, delete: if isOwner();
+    }
+
+    /* ===================== NOTIFICATIONS ===================== */
+    match /notifications/{notifId} {
+      allow read, update: if isSignedIn() && (isOwner() || resource.data.uid == myUid());
+      allow create: if isSignedIn();
+      allow delete: if isOwner();
+    }
+
+    /* ===================== AUDIT LOGS (owner-only) ===================== */
+    match /adminLogs/{logId} {
+      allow read: if isOwner();
+      allow create: if isOwner();
+      allow update, delete: if false; // amateka ntagomba guhindurwa cyangwa gusibwa
+    }
+
+    /* ===================== MARKETPLACE / MOTORCYCLES / BUSINESSES ===================== */
+    match /listings/{id} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.uid == myUid();
+      allow update: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+      allow delete: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+    }
+    match /motorcycles/{id} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.uid == myUid();
+      allow update: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+      allow delete: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+    }
+    match /businesses/{id} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.uid == myUid();
+      allow update: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+      allow delete: if isOwner() || (isSignedIn() && resource.data.uid == myUid());
+    }
+  }
+}
